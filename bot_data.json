@@ -1,0 +1,13 @@
+{
+    "max_judges_popolari": 10,
+    "max_judges_tecnica": 5,
+    "votes_popolare": {},
+    "votes_tecnica": {},
+    "judges_popolare": [],
+    "judges_tecnica": [],
+    "judge_types": {},
+    "password_popolare": "1234",
+    "password_tecnica": "5678",
+    "password_owner": "9999",
+    "owner_id": 547260823
+}

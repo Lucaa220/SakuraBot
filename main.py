@@ -898,18 +898,16 @@ async def health_check(request: web.Request) -> web.Response:
 
 # Gestione del webhook: usa la variabile globale `application`
 async def handle_webhook(request: web.Request) -> web.Response:
-    global application
+    global application  # Ensure you are using the global application
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # Recupera l'istanza salvata di Application
-    telegram_app = request.app['application']
-
-    update = Update.de_json(data, telegram_app.bot)
-    asyncio.create_task(telegram_app.process_update(update))
+    # Use the global application directly
+    update = Update.de_json(data, application.bot)
+    asyncio.create_task(application.process_update(update))
 
     return web.Response(text="OK")
 

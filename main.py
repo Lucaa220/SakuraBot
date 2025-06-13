@@ -899,7 +899,7 @@ async def webhook_get(request: web.Request) -> web.Response:
     return web.Response(text="Webhook endpoint: usa POST per Telegram.")
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    global application  # Usa la variabile globale application
+    global application  # Ensure you are using the global application
     try:
         data = await request.json()
     except Exception as e:
@@ -907,6 +907,7 @@ async def handle_webhook(request: web.Request) -> web.Response:
         return web.Response(status=400, text="Invalid JSON")
     update = Update.de_json(data, application.bot)
     asyncio.create_task(application.process_update(update))
+
     return web.Response(text="OK")
 
 # Avvia l’aiohttp webserver

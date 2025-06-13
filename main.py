@@ -897,8 +897,8 @@ async def health_check(request: web.Request) -> web.Response:
 
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    # retrieve the Application instance
-    telegram_application = request.app['tg_app']
+    # Recupera l'istanza di Application salvata in fase di startup
+    telegram_application: Application = request.app['tg_app']
 
     try:
         data = await request.json()
@@ -906,25 +906,30 @@ async def handle_webhook(request: web.Request) -> web.Response:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # now correctly de-serialize using telegram_application.bot
+    # Deserializza l'update usando telegram_application.bot
     update = Update.de_json(data, telegram_application.bot)
+    # Processo l'update in background
     asyncio.create_task(telegram_application.process_update(update))
 
     return web.Response(text="OK")
 
 
-async def start_webserver() -> None:
+async def start_webserver(telegram_app: Application) -> None:
     load_dotenv()
     PORT = int(os.getenv('PORT', '8443'))
 
+    # Crea l'applicazione aiohttp e registra telegram_app
     webapp = web.Application()
-    webapp.router.add_get('/', health_check)       
-    webapp.router.add_get('/health', health_check)  
+    webapp['tg_app'] = telegram_app
+
+    # Rotte di health-check e webhook
+    webapp.router.add_get('/', health_check)
+    webapp.router.add_get('/health', health_check)
     webapp.router.add_post('/webhook', handle_webhook)
 
+    # Avvia il runner e il site
     runner = web.AppRunner(webapp)
     await runner.setup()
-
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
 

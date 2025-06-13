@@ -904,10 +904,13 @@ async def handle_webhook(request: web.Request) -> web.Response:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # Deserializza e metti in coda l'update
-    update = Update.de_json(data, application.bot)
-    asyncio.create_task(application.process_update(update))
-    return web.Response(text="OK")
+    # Recupera l'istanza salvata di Application
+    telegram_app = request.app['application']
+
+    update = Update.de_json(data, telegram_app.bot)
+    asyncio.create_task(telegram_app.process_update(update))
+
+    return web.Response(text="Funziono")
 
 
 # Avvia l’aiohttp webserver

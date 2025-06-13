@@ -945,6 +945,8 @@ async def main() -> None:
     # Rende `application` disponibile a livello globale
     global application
     application = Application.builder().token(TOKEN).build()
+    logger.info(f"Application variable: {application}")
+
 
     # 2) Carica eventuali bot_data e registra handler
     data = load_bot_data()  # tua funzione di caricamento dati

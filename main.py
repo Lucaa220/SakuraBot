@@ -728,30 +728,39 @@ def update_artists_file(artists: dict) -> None:
             f.write(content)
     except Exception as e:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
+        
+async def health_check(request: web.Request) -> web.Response:
+    # This function needs to be defined for the router
+    return web.Response(text="OK", status=200)
 
 async def handle_webhook(request: web.Request) -> web.Response:
+    # Access the application object via the request object
+    # This assumes 'application' is stored in webapp['tg_app']
+    telegram_application = request.app['tg_app'] 
+
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # Questa funzione ora usa la variabile globale 'application'
-    update = Update.de_json(data, application.bot)
+    update = Update.de_json(data, telegram_application.bot)
 
-    asyncio.create_task(application.process_update(update))
+    asyncio.create_task(telegram_application.process_update(update))
 
     return web.Response(text="OK")
 
 
-async def start_webserver() -> None:
-    load_dotenv()
+async def start_webserver(application_instance: Application) -> None: # Accept application instance
     PORT = int(os.getenv('PORT', '8443'))
 
     webapp = web.Application()
     webapp.router.add_get('/', health_check)
     webapp.router.add_get('/health', health_check)
-    webapp.router.add_post('/webhook', handle_webhook)
+    
+    # Store the application instance in the webapp for access in handlers
+    webapp['tg_app'] = application_instance 
+    webapp.router.add_post('/webhook', handle_webhook) # handle_webhook will now fetch it from request.app
 
     runner = web.AppRunner(webapp)
     await runner.setup()
@@ -764,16 +773,12 @@ async def start_webserver() -> None:
 
 async def main() -> None:
     load_dotenv()
-    # TOKEN e WEBHOOK_URL vengono già caricati a livello globale
-    
     if not TOKEN or not WEBHOOK_URL:
         logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
         return
 
-    # --- INIZIO MODIFICA ---
-    # Rimuoviamo la creazione di 'app' e 'global application' da qui.
-    # L'oggetto 'application' è già stato creato globalmente.
-    # Usiamo 'application' al posto di 'app' per caricare i dati e aggiungere gli handler.
+    # Create the application instance here
+    application = Application.builder().token(TOKEN).build()
 
     data = load_bot_data()
     if data:

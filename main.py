@@ -919,6 +919,7 @@ async def start_webserver() -> None:
     PORT = int(os.getenv('PORT', '8443'))
 
     webapp = web.Application()
+    webapp['application'] = application
     webapp.router.add_get('/', health_check)
     webapp.router.add_get('/health', health_check)
     webapp.router.add_post('/webhook', handle_webhook)

@@ -897,29 +897,30 @@ async def health_check(request: web.Request) -> web.Response:
 
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    # 1) Recupera l'istanza di Application dal startup
+    # 1) Recupera l'istanza di Application salvata in startup
     telegram_app: Application = request.app['tg_app']
 
-    # 2) Leggi il JSON
+    # 2) Leggi il corpo JSON
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # 3) Deserializza e processa in background
+    # 3) Deserializza usando telegram_app.bot
     update = Update.de_json(data, telegram_app.bot)
+
+    # 4) Processa l'update in background
     asyncio.create_task(telegram_app.process_update(update))
 
     return web.Response(text="OK")
 
 
 async def start_webserver(telegram_app: Application) -> None:
-    load_dotenv()
+    load_dotenv()  # ricarica le variabili se servisse
     port = int(os.getenv('PORT', '8443'))
 
     webapp = web.Application()
-    # registra qui l'istanza di Telegram
     webapp['tg_app'] = telegram_app
 
     webapp.router.add_get('/', health_check)
@@ -943,21 +944,17 @@ async def main() -> None:
         logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
         return
 
-    # 1) Crea l’app di python-telegram-bot
-    telegram_app = (
-        Application.builder()
-        .token(TOKEN)
-        .build()
-    )
+    # 1) Crea l’Application di python-telegram-bot
+    telegram_app = Application.builder().token(TOKEN).build()
 
-    # 2) Eventuali bot_data / handler
-    data = load_bot_data()
+    # 2) Carica eventuali bot_data e registra handler
+    data = load_bot_data()  # tua funzione di caricamento dati
     if data:
         telegram_app.bot_data.update(data)
     telegram_app.bot_data.setdefault("artists", artists)
     telegram_app.bot_data.setdefault("owners_ids", set())
 
-    # Comandi di base
+    # Registrazione dei command handler
     telegram_app.add_handler(CommandHandler('start', start), group=0)
     telegram_app.add_handler(CommandHandler('set', set_limit_command), group=0)
     telegram_app.add_handler(CommandHandler('artisti', artisti_command), group=0)
@@ -966,15 +963,12 @@ async def main() -> None:
     telegram_app.add_handler(CommandHandler('logout', logout), group=0)
     telegram_app.add_handler(CommandHandler('cancel', cancel), group=0)
 
+    # ConversationHandler
     conv = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            PASSWORD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, check_password),
-            ],
-            VOTE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, vote_handler),
-            ],
+            PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)],
+            VOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, vote_handler)],
             MAIN_MENU: [
                 CallbackQueryHandler(owner_button_handler, pattern="^artist[0-9]+$"),
                 CallbackQueryHandler(owner_button_handler, pattern="^stop_voting$"),
@@ -984,7 +978,7 @@ async def main() -> None:
                 CallbackQueryHandler(close_keyboard_callback, pattern="^close_keyboard$")
             ],
             SET_DETAIL: [
-                CallbackQueryHandler(set_detail_callback, pattern="^set_limit_popolare|set_limit_tecnica|set_pass_popolare|set_pass_tecnica|set_pass_owner|back_to_main_menu$")
+                CallbackQueryHandler(set_detail_callback, pattern="^(set_limit_popolare|set_limit_tecnica|set_pass_popolare|set_pass_tecnica|set_pass_owner|back_to_main_menu)$")
             ],
             SET_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_value_handler),
@@ -1018,22 +1012,31 @@ async def main() -> None:
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         per_user=True,
-        per_chat=True
+        per_chat=True,
     )
     telegram_app.add_handler(conv, group=1)
     telegram_app.add_handler(CallbackQueryHandler(owner_button_handler), group=0)
 
-    # 3) Inizializza e imposta webhook
+    # 3) Inizializza e avvia l’Application
     await telegram_app.initialize()
+    await telegram_app.start()
+
+    # 4) Imposta il webhook su Telegram
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook impostato su: {WEBHOOK_URL}")
 
-    # 4) Avvia il webserver passando l'app
+    # 5) Avvia il webserver aiohttp
     await start_webserver(telegram_app)
 
-    # 5) Blocca il processo
+    # 6) Mantieni vivo il processo
     await asyncio.Event().wait()
 
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+
+
+
+
+

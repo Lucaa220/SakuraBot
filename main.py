@@ -892,49 +892,27 @@ def update_artists_file(artists: dict) -> None:
     except Exception as e:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
-async def health_check(request: web.Request) -> web.Response:
-    return web.Response(text="OK")
-
-async def webhook_get(request: web.Request) -> web.Response:
-    return web.Response(text="Webhook endpoint: usa POST per Telegram.")
-
 async def handle_webhook(request: web.Request) -> web.Response:
-    """
-    Riceve il POST dal webhook Telegram, estrae l'istanza di telegram.Application
-    da request.app e la usa per creare e processare l'update.
-    """
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parsing del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # Riprendo l'istanza di Application registrata in start_webserver()
     app: Application = request.app['application']
-
-    # Deserializzo l'update e lo processo in background
     update = Update.de_json(data, app.bot)
     asyncio.create_task(app.process_update(update))
-
     return web.Response(text="OK")
 
-def start_webserver(application, host: str = "0.0.0.0", port: int = 10000):
-    """
-    Avvia il webserver Aiohttp e registra l'istanza di telegram.Application
-    nel dict interno di Aiohttp sotto la chiave 'application'.
-    """
+async def hello(request: web.Request) -> web.Response:
+    return web.Response(text="OK", status=200)
+
+# 3) Funzione sincrona di avvio del webserver
+def start_webserver(application: Application, host: str = "0.0.0.0", port: int = 10000):
     webapp = web.Application()
-    # **Qui** salviamo l'istanza di telegram.Application
     webapp['application'] = application
-
-    # Registro il route per il webhook
     webapp.router.add_post("/webhook", handle_webhook)
-
-    # Facoltativamente un handler per GET /
-    async def hello(request):
-        return web.Response(text="OK", status=200)
     webapp.router.add_get("/", hello)
-
     web.run_app(webapp, host=host, port=port)
 
 async def main() -> None:
@@ -1021,7 +999,7 @@ async def main() -> None:
     logger.info(f"Webhook impostato su: {WEBHOOK_URL}")
 
     # Avvia il webserver che riceverà i POST da Telegram
-    await start_webserver()
+    await start_webserver(application, host="0.0.0.0", port=10000)
 
     # Mantieni vivo il processo
     await asyncio.Event().wait()

@@ -729,72 +729,94 @@ def update_artists_file(artists: dict) -> None:
     except Exception as e:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
-async def webhook_handler(request: web.Request) -> web.Response:
+async def handle_webhook(request: web.Request) -> web.Response:
     try:
         data = await request.json()
     except Exception as e:
-        logger.error("Errore nella lettura del JSON: %s", e)
-        return web.Response(text="Dati non validi", status=400)
+        logger.error(f"Errore nel parse del JSON: {e}")
+        return web.Response(status=400, text="Invalid JSON")
+
+    # Questa funzione ora usa la variabile globale 'application'
     update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+
+    asyncio.create_task(application.process_update(update))
+
     return web.Response(text="OK")
 
-# Handler per il check di salute
-async def health_handler(request: web.Request) -> web.Response:
-    return web.Response(text="Bot attivo!")
 
-# Configurazione dell'app web (aiohttp)
-async def setup_webapp() -> web.Application:
-    app = web.Application()
-    app.router.add_post("/webhook", webhook_handler)
-    app.router.add_get("/health", health_handler)
-    app.router.add_get("/", health_handler)
-    return app
+async def start_webserver() -> None:
+    load_dotenv()
+    PORT = int(os.getenv('PORT', '8443'))
 
-async def main():
-    global application
-    application = Application.builder().token(TOKEN).build()
+    webapp = web.Application()
+    webapp.router.add_get('/', health_check)
+    webapp.router.add_get('/health', health_check)
+    webapp.router.add_post('/webhook', handle_webhook)
 
-    # Carica eventuali dati salvati e aggiornali in bot_data
-    saved_data = load_bot_data()
-    if saved_data:
-        application.bot_data.update(saved_data)
-    application.bot_data["artists"] = artists
+    runner = web.AppRunner(webapp)
+    await runner.setup()
 
-    # ConversationHandler per il comando /start
-    conv_handler = ConversationHandler(
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+
+    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
+
+
+async def main() -> None:
+    load_dotenv()
+    # TOKEN e WEBHOOK_URL vengono già caricati a livello globale
+    
+    if not TOKEN or not WEBHOOK_URL:
+        logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
+        return
+
+    # --- INIZIO MODIFICA ---
+    # Rimuoviamo la creazione di 'app' e 'global application' da qui.
+    # L'oggetto 'application' è già stato creato globalmente.
+    # Usiamo 'application' al posto di 'app' per caricare i dati e aggiungere gli handler.
+
+    data = load_bot_data()
+    if data:
+        application.bot_data.update(data)
+    application.bot_data.setdefault("artists", artists)
+    application.bot_data.setdefault("owners_ids", set())
+
+    application.add_handler(CommandHandler('start', start), group=0)
+    application.add_handler(CommandHandler('set', set_limit_command), group=0)
+    application.add_handler(CommandHandler('artisti', artisti_command), group=0)
+    application.add_handler(CommandHandler('votazioni', votazioni_command), group=0)
+    application.add_handler(CommandHandler('reset', reset_voting), group=0)
+    application.add_handler(CommandHandler('logout', logout), group=0)
+    application.add_handler(CommandHandler('cancel', cancel), group=0)
+
+    conv = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)],
-            VOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, vote_handler)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    # ConversationHandler per il comando /set
-    set_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('set', set_limit_command)],
-        states={
+            PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, check_password),
+            ],
+            VOTE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, vote_handler),
+            ],
+            MAIN_MENU: [
+                CallbackQueryHandler(owner_button_handler, pattern="^artist[0-9]+$"),
+                CallbackQueryHandler(owner_button_handler, pattern="^stop_voting$"),
+            ],
             SET_OPTION: [
-                CallbackQueryHandler(set_option_callback, pattern="^(set_judges|set_passwords)$"),
+                CallbackQueryHandler(set_option_callback, pattern="^(set_judges|set_passwords|set_home_picture)$"),
                 CallbackQueryHandler(close_keyboard_callback, pattern="^close_keyboard$")
             ],
             SET_DETAIL: [
-                CallbackQueryHandler(set_detail_callback, pattern="^(set_limit_popolare|set_limit_tecnica|set_pass_popolare|set_pass_tecnica|set_pass_owner|back_to_main_menu)$")
+                CallbackQueryHandler(set_detail_callback, pattern="^set_limit_popolare|set_limit_tecnica|set_pass_popolare|set_pass_tecnica|set_pass_owner|back_to_main_menu$")
             ],
             SET_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_value_handler),
                 CallbackQueryHandler(back_to_password_menu_callback, pattern="^back_to_password_menu$"),
                 CallbackQueryHandler(back_to_limit_menu_callback, pattern="^back_to_limit_menu$")
             ],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    # ConversationHandler per il comando /artisti
-    artisti_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('artisti', artisti_command)],
-        states={
+            SET_HOME_PICTURE: [
+                MessageHandler(filters.PHOTO, set_home_picture_handler)
+            ],
             ARTISTI_CHOICE: [
                 CallbackQueryHandler(artisti_choice_callback, pattern="^(add_artist|remove_artist|cancel_artists)$")
             ],
@@ -810,41 +832,28 @@ async def main():
             ARTISTI_ADD_SONG: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, add_artist_song_handler)
             ],
+            ARTISTI_ADD_CATEGORY: [
+                CallbackQueryHandler(add_artist_category_handler, pattern="^categoria_")
+            ],
             ARTISTI_REMOVE: [
                 CallbackQueryHandler(remove_artist_callback, pattern="^(rm_.*|cancel_artists)$")
             ],
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler('cancel', cancel)],
+        per_user=True,
+        per_chat=True
     )
+    application.add_handler(conv, group=1)
+    application.add_handler(CallbackQueryHandler(owner_button_handler), group=0)
+    # --- FINE MODIFICA ---
 
-    # Registra i vari handler
-    application.add_handler(artisti_conv_handler)
-    application.add_handler(conv_handler)
-    application.add_handler(set_conv_handler)
-    application.add_handler(CommandHandler('logout', logout))
-    application.add_handler(CommandHandler('reset', reset_voting))
-    application.add_handler(CommandHandler('votazioni', votazioni_command))
-    application.add_handler(CallbackQueryHandler(owner_button_handler))
-
-    # Imposta il webhook: Telegram invierà gli update a questo URL
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info("Webhook impostato su %s", WEBHOOK_URL)
-
-    # Inizializza e avvia il bot (necessario per processare gli update)
     await application.initialize()
-    await application.start()
+    await application.bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"Webhook impostato su: {WEBHOOK_URL}")
 
-    # Avvia il server web per gestire il webhook
-    app = await setup_webapp()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    logger.info("Server web attivo sulla porta %d", PORT)
+    await start_webserver()
+    await asyncio.Event().wait()
 
-    # Mantieni il bot attivo 24/7
-    while True:
-        await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())

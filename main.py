@@ -907,7 +907,7 @@ async def handle_webhook(request: web.Request) -> web.Response:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # 3) Deserializza usando telegram_app.bot
+    # 3) Deserializza usando telegram_app.bot (prima si sbagliava a usare `application.bot`)
     update = Update.de_json(data, telegram_app.bot)
 
     # 4) Processa l'update in background
@@ -1034,9 +1034,3 @@ async def main() -> None:
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-
-
-
-
-

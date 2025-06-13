@@ -895,38 +895,34 @@ def update_artists_file(artists: dict) -> None:
 async def health_check(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
+async def webhook_get(request: web.Request) -> web.Response:
+    return web.Response(text="Webhook endpoint: usa POST per Telegram.")
 
-# Gestione del webhook: usa la variabile globale `application`
 async def handle_webhook(request: web.Request) -> web.Response:
-    global application  # Ensure you are using the global application
+    global application  # Usa la variabile globale application
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
-
-    # Use the global application directly
     update = Update.de_json(data, application.bot)
     asyncio.create_task(application.process_update(update))
-
     return web.Response(text="OK")
 
 # Avvia l’aiohttp webserver
 async def start_webserver() -> None:
     load_dotenv()
     PORT = int(os.getenv('PORT', '8443'))
-
     webapp = web.Application()
     webapp['application'] = application
     webapp.router.add_get('/', health_check)
     webapp.router.add_get('/health', health_check)
-    webapp.router.add_post('/webhook', handle_webhook)
-
+    webapp.router.add_get('/webhook', webhook_get)     # Aggiunto handler GET per /webhook
+    webapp.router.add_post('/webhook', handle_webhook) # Mantieni POST per /webhook
     runner = web.AppRunner(webapp)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-
     logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
 
 
@@ -1029,7 +1025,6 @@ async def main() -> None:
 
 if __name__ == '__main__':
     asyncio.run(main())
-
 
 
 

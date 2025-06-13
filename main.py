@@ -897,22 +897,23 @@ async def health_check(request: web.Request) -> web.Response:
 
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    # Recupera l'istanza di Application salvata in fase di startup
+    # 1) Prendi l'app Telegram registrata in fase di startup
     telegram_application: Application = request.app['tg_app']
 
+    # 2) Leggi il corpo JSON
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # Deserializza l'update usando telegram_application.bot
+    # 3) Deserializza usando telegram_application.bot (non più application.bot!)
     update = Update.de_json(data, telegram_application.bot)
-    # Processo l'update in background
+
+    # 4) Processa l'update in background
     asyncio.create_task(telegram_application.process_update(update))
 
     return web.Response(text="OK")
-
 
 async def start_webserver(telegram_app: Application) -> None:
     load_dotenv()

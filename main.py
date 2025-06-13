@@ -903,7 +903,7 @@ async def handle_webhook(request: web.Request) -> web.Response:
         logger.error(f"Errore nel parsing del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # <- qui prendo l'app corretta, NON uso la variabile globale
+    # Prendi l'app corretta da request.app, NON usare la variabile globale
     app: Application = request.app["application"]
     update = Update.de_json(data, app.bot)
     asyncio.create_task(app.process_update(update))
@@ -912,7 +912,7 @@ async def handle_webhook(request: web.Request) -> web.Response:
 async def hello(request: web.Request) -> web.Response:
     return web.Response(text="OK", status=200)
 
-def start_webserver(application: Application, host: str = "0.0.0.0", port: int = 10000):
+async def start_webserver(application: Application, host: str = "0.0.0.0", port: int = 10000):
     """
     Avvia il server Aiohttp, registra l'istanza di Application in request.app
     e monta le rotte /webhook e /.
@@ -924,8 +924,15 @@ def start_webserver(application: Application, host: str = "0.0.0.0", port: int =
     webapp.router.add_get("/", hello)
 
     logger.info(f"Avvio webserver su {host}:{port}")
-    web.run_app(webapp, host=host, port=port)
-
+    
+    # Crea il runner per gestire il server in modo asincrono
+    runner = web.AppRunner(webapp)
+    await runner.setup()
+    
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    
+    logger.info(f"Webserver avviato su {host}:{port}")
 
 async def main() -> None:
     load_dotenv()
@@ -934,10 +941,12 @@ async def main() -> None:
     if not TOKEN or not WEBHOOK_URL:
         logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
         return
-    global application  # Dichiarazione globale
+    
+    # Rimuovi la dichiarazione globale non necessaria
     application = Application.builder().token(TOKEN).build()
-    # 2) Carica eventuali bot_data e registra handler
-    data = load_bot_data()  # tua funzione di caricamento dati
+    
+    # Carica eventuali bot_data e registra handler
+    data = load_bot_data()
     if data:
         application.bot_data.update(data)
     application.bot_data.setdefault("artists", artists)
@@ -1015,7 +1024,6 @@ async def main() -> None:
 
     # Mantieni vivo il processo
     await asyncio.Event().wait()
-
-
+    
 if __name__ == '__main__':
     asyncio.run(main())

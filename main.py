@@ -896,45 +896,39 @@ async def health_check(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
+# Gestione del webhook: usa la variabile globale `application`
 async def handle_webhook(request: web.Request) -> web.Response:
-    # 1) Recupera l'istanza di Application salvata in startup
-    telegram_app: Application = request.app['tg_app']
-
-    # 2) Leggi il corpo JSON
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    # 3) Deserializza usando telegram_app.bot (prima si sbagliava a usare `application.bot`)
-    update = Update.de_json(data, telegram_app.bot)
-
-    # 4) Processa l'update in background
-    asyncio.create_task(telegram_app.process_update(update))
-
+    # Deserializza e metti in coda l'update
+    update = Update.de_json(data, application.bot)
+    asyncio.create_task(application.process_update(update))
     return web.Response(text="OK")
 
 
-async def start_webserver(telegram_app: Application) -> None:
-    load_dotenv()  # ricarica le variabili se servisse
-    port = int(os.getenv('PORT', '8443'))
+# Avvia l’aiohttp webserver
+async def start_webserver() -> None:
+    load_dotenv()
+    PORT = int(os.getenv('PORT', '8443'))
 
     webapp = web.Application()
-    webapp['tg_app'] = telegram_app
-
     webapp.router.add_get('/', health_check)
     webapp.router.add_get('/health', health_check)
     webapp.router.add_post('/webhook', handle_webhook)
 
     runner = web.AppRunner(webapp)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
 
-    logger.info(f"Webserver avviato su 0.0.0.0:{port}")
+    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
 
 
+# Main: costruisci il bot, registra handler, imposta webhook e parte il server
 async def main() -> None:
     load_dotenv()
     TOKEN = os.getenv('TOKEN')
@@ -944,24 +938,25 @@ async def main() -> None:
         logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
         return
 
-    # 1) Crea l’Application di python-telegram-bot
-    telegram_app = Application.builder().token(TOKEN).build()
+    # Rende `application` disponibile a livello globale
+    global application
+    application = Application.builder().token(TOKEN).build()
 
     # 2) Carica eventuali bot_data e registra handler
     data = load_bot_data()  # tua funzione di caricamento dati
     if data:
-        telegram_app.bot_data.update(data)
-    telegram_app.bot_data.setdefault("artists", artists)
-    telegram_app.bot_data.setdefault("owners_ids", set())
+        application.bot_data.update(data)
+    application.bot_data.setdefault("artists", artists)
+    application.bot_data.setdefault("owners_ids", set())
 
     # Registrazione dei command handler
-    telegram_app.add_handler(CommandHandler('start', start), group=0)
-    telegram_app.add_handler(CommandHandler('set', set_limit_command), group=0)
-    telegram_app.add_handler(CommandHandler('artisti', artisti_command), group=0)
-    telegram_app.add_handler(CommandHandler('votazioni', votazioni_command), group=0)
-    telegram_app.add_handler(CommandHandler('reset', reset_voting), group=0)
-    telegram_app.add_handler(CommandHandler('logout', logout), group=0)
-    telegram_app.add_handler(CommandHandler('cancel', cancel), group=0)
+    application.add_handler(CommandHandler('start', start), group=0)
+    application.add_handler(CommandHandler('set', set_limit_command), group=0)
+    application.add_handler(CommandHandler('artisti', artisti_command), group=0)
+    application.add_handler(CommandHandler('votazioni', votazioni_command), group=0)
+    application.add_handler(CommandHandler('reset', reset_voting), group=0)
+    application.add_handler(CommandHandler('logout', logout), group=0)
+    application.add_handler(CommandHandler('cancel', cancel), group=0)
 
     # ConversationHandler
     conv = ConversationHandler(
@@ -1014,23 +1009,25 @@ async def main() -> None:
         per_user=True,
         per_chat=True,
     )
-    telegram_app.add_handler(conv, group=1)
-    telegram_app.add_handler(CallbackQueryHandler(owner_button_handler), group=0)
+    application.add_handler(conv, group=1)
+    application.add_handler(CallbackQueryHandler(owner_button_handler), group=0)
 
-    # 3) Inizializza e avvia l’Application
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-    # 4) Imposta il webhook su Telegram
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    await application.initialize()
+    await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook impostato su: {WEBHOOK_URL}")
 
-    # 5) Avvia il webserver aiohttp
-    await start_webserver(telegram_app)
+    # Avvia il webserver che riceverà i POST da Telegram
+    await start_webserver()
 
-    # 6) Mantieni vivo il processo
+    # Mantieni vivo il processo
     await asyncio.Event().wait()
 
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+
+
+
+
+

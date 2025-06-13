@@ -897,15 +897,18 @@ async def health_check(request: web.Request) -> web.Response:
 
 
 async def handle_webhook(request: web.Request) -> web.Response:
+    # retrieve the Application instance
+    telegram_application = request.app['tg_app']
+
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    update = Update.de_json(data, application.bot)
-
-    asyncio.create_task(application.process_update(update))
+    # now correctly de-serialize using telegram_application.bot
+    update = Update.de_json(data, telegram_application.bot)
+    asyncio.create_task(telegram_application.process_update(update))
 
     return web.Response(text="OK")
 

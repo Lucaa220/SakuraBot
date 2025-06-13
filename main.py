@@ -899,33 +899,43 @@ async def webhook_get(request: web.Request) -> web.Response:
     return web.Response(text="Webhook endpoint: usa POST per Telegram.")
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    global application  # Assicurati di usare la variabile globale application
+    """
+    Riceve il POST dal webhook Telegram, estrae l'istanza di telegram.Application
+    da request.app e la usa per creare e processare l'update.
+    """
     try:
         data = await request.json()
     except Exception as e:
-        logger.error(f"Errore nel parse del JSON: {e}")
+        logger.error(f"Errore nel parsing del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    update = Update.de_json(data, application.bot)  # Usa la variabile globale
-    asyncio.create_task(application.process_update(update))
+    # Riprendo l'istanza di Application registrata in start_webserver()
+    app: Application = request.app['application']
+
+    # Deserializzo l'update e lo processo in background
+    update = Update.de_json(data, app.bot)
+    asyncio.create_task(app.process_update(update))
 
     return web.Response(text="OK")
 
-async def start_webserver() -> None:
-    load_dotenv()
-    PORT = int(os.getenv('PORT', '8443'))
+def start_webserver(application, host: str = "0.0.0.0", port: int = 10000):
+    """
+    Avvia il webserver Aiohttp e registra l'istanza di telegram.Application
+    nel dict interno di Aiohttp sotto la chiave 'application'.
+    """
     webapp = web.Application()
+    # **Qui** salviamo l'istanza di telegram.Application
     webapp['application'] = application
-    webapp.router.add_get('/', health_check)
-    webapp.router.add_get('/health', health_check)
-    webapp.router.add_get('/webhook', webhook_get)     # Aggiunto handler GET per /webhook
-    webapp.router.add_post('/webhook', handle_webhook) # Mantieni POST per /webhook
-    runner = web.AppRunner(webapp)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
 
+    # Registro il route per il webhook
+    webapp.router.add_post("/webhook", handle_webhook)
+
+    # Facoltativamente un handler per GET /
+    async def hello(request):
+        return web.Response(text="OK", status=200)
+    webapp.router.add_get("/", hello)
+
+    web.run_app(webapp, host=host, port=port)
 
 async def main() -> None:
     load_dotenv()

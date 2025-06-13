@@ -898,6 +898,7 @@ async def health_check(request: web.Request) -> web.Response:
 
 # Gestione del webhook: usa la variabile globale `application`
 async def handle_webhook(request: web.Request) -> web.Response:
+    global application
     try:
         data = await request.json()
     except Exception as e:
@@ -910,8 +911,7 @@ async def handle_webhook(request: web.Request) -> web.Response:
     update = Update.de_json(data, telegram_app.bot)
     asyncio.create_task(telegram_app.process_update(update))
 
-    return web.Response(text="Funziono")
-
+    return web.Response(text="OK")
 
 # Avvia l’aiohttp webserver
 async def start_webserver() -> None:

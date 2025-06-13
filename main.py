@@ -893,13 +893,18 @@ def update_artists_file(artists: dict) -> None:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
 async def handle_webhook(request: web.Request) -> web.Response:
+    """
+    Riceve il POST dal webhook Telegram, estrae l'istanza di Application
+    da request.app e processa l'Update in background.
+    """
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parsing del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
 
-    app: Application = request.app['application']
+    # <- qui prendo l'app corretta, NON uso la variabile globale
+    app: Application = request.app["application"]
     update = Update.de_json(data, app.bot)
     asyncio.create_task(app.process_update(update))
     return web.Response(text="OK")
@@ -907,13 +912,20 @@ async def handle_webhook(request: web.Request) -> web.Response:
 async def hello(request: web.Request) -> web.Response:
     return web.Response(text="OK", status=200)
 
-# 3) Funzione sincrona di avvio del webserver
 def start_webserver(application: Application, host: str = "0.0.0.0", port: int = 10000):
+    """
+    Avvia il server Aiohttp, registra l'istanza di Application in request.app
+    e monta le rotte /webhook e /.
+    """
     webapp = web.Application()
-    webapp['application'] = application
+    webapp["application"] = application
+
     webapp.router.add_post("/webhook", handle_webhook)
     webapp.router.add_get("/", hello)
+
+    logger.info(f"Avvio webserver su {host}:{port}")
     web.run_app(webapp, host=host, port=port)
+
 
 async def main() -> None:
     load_dotenv()
@@ -1007,8 +1019,3 @@ async def main() -> None:
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-
-
-
-

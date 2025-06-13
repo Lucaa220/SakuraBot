@@ -899,18 +899,18 @@ async def webhook_get(request: web.Request) -> web.Response:
     return web.Response(text="Webhook endpoint: usa POST per Telegram.")
 
 async def handle_webhook(request: web.Request) -> web.Response:
-    global application  # Ensure you are using the global application
+    global application  # Assicurati di usare la variabile globale application
     try:
         data = await request.json()
     except Exception as e:
         logger.error(f"Errore nel parse del JSON: {e}")
         return web.Response(status=400, text="Invalid JSON")
-    update = Update.de_json(data, application.bot)
+
+    update = Update.de_json(data, application.bot)  # Usa la variabile globale
     asyncio.create_task(application.process_update(update))
 
     return web.Response(text="OK")
 
-# Avvia l’aiohttp webserver
 async def start_webserver() -> None:
     load_dotenv()
     PORT = int(os.getenv('PORT', '8443'))
@@ -927,22 +927,15 @@ async def start_webserver() -> None:
     logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
 
 
-# Main: costruisci il bot, registra handler, imposta webhook e parte il server
 async def main() -> None:
     load_dotenv()
     TOKEN = os.getenv('TOKEN')
     WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-
     if not TOKEN or not WEBHOOK_URL:
         logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
         return
-
-    # Rende `application` disponibile a livello globale
-    global application
+    global application  # Dichiarazione globale
     application = Application.builder().token(TOKEN).build()
-    logger.info(f"Application variable: {application}")
-
-
     # 2) Carica eventuali bot_data e registra handler
     data = load_bot_data()  # tua funzione di caricamento dati
     if data:

@@ -980,25 +980,35 @@ async def on_startup(aio_app: web.Application):
     bot_app.add_handler(conv, group=1)
     bot_app.add_handler(CallbackQueryHandler(owner_button_handler))
 
-    # inizializza e avvia bot
     await bot_app.initialize()
     await bot_app.start()
-    await bot_app.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+
+    # === costruisci qui l'URL completo ===
+    WEBHOOK_PATH = f"/{TOKEN}"
+    full_webhook = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+    await bot_app.bot.set_webhook(full_webhook)
 
     aio_app["bot_app"] = bot_app
-    logger.info("Bot avviato e webhook impostato su %s%s", WEBHOOK_URL, WEBHOOK_PATH)
+    logger.info("Webhook impostato su: %s", full_webhook)
 
 async def on_cleanup(aio_app: web.Application):
     bot_app: Application = aio_app["bot_app"]
     await bot_app.stop()
     await bot_app.shutdown()
     logger.info("Bot stoppato e pulito")
+    
+async def health(request):
+    return web.Response(text="OK")
 
 def main():
     aio_app = web.Application()
+    # monta il health‑check
+    aio_app.router.add_get("/", health)
+
+    # startup / cleanup e webhook path come prima…
     aio_app.on_startup.append(on_startup)
     aio_app.on_cleanup.append(on_cleanup)
-    aio_app.router.add_post(WEBHOOK_PATH, telegram_webhook)
+    aio_app.router.add_post(f"/{TOKEN}", telegram_webhook)
 
     port = int(os.environ.get("PORT", 10000))
     web.run_app(aio_app, host="0.0.0.0", port=port)

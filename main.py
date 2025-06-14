@@ -985,33 +985,27 @@ async def main() -> None:
 
     # Initialize bot and set webhook
     await application.initialize()
-    # Usa un URL segreto per il webhook, di solito il token stesso
     webhook_path = f"/{TOKEN}"
     full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
+    
     await application.bot.set_webhook(url=full_webhook_url)
 
-    # Crea l'applicazione web aiohttp
     app = web.Application()
-
-    # --- MODIFICA 3: Collega l'applicazione del bot allo stato dell'app web.
     app["bot_app"] = application
 
-    # Aggiungi le route
+    # --- MODIFICA CHIAVE 2: Il server si mette in ascolto sullo STESSO percorso ---
     app.router.add_post(webhook_path, telegram_webhook)
     app.router.add_get("/health", health_check)
 
-    # Avvia il server web
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
 
-    logger.info(f"Webhook impostato su: {full_webhook_url}")
+    logger.info(f"Webhook impostato su: {full_webhook_url}") # Questo log ora mostrerà l'URL corretto
     logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
     await site.start()
 
-    # Mantieni il server in esecuzione
     await asyncio.Event().wait()
-
 
 if __name__ == "__main__":
     try:

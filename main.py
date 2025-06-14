@@ -892,65 +892,18 @@ def update_artists_file(artists: dict) -> None:
     except Exception as e:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
-async def handle_webhook(request: web.Request) -> web.Response:
-    try:
-        data = await request.json()
-    except Exception as e:
-        logger.error(f"Errore nel parsing del JSON: {e}")
-        return web.Response(status=400, text="Invalid JSON")
-
-    # Prendi l'app corretta da request.app, NON usare la variabile globale
-    update = Update.de_json(data, application.bot)
-    asyncio.create_task(application.process_update(update))
-    return web.Response(text="OK")
-
-async def health_check(request: web.Request) -> web.Response:
-    return web.Response(text="OK")
-
-async def start_webserver() -> None:
-    load_dotenv()
-    PORT = int(os.getenv('PORT', '8443'))
-    webapp = web.Application()
-    webapp.router.add_get('/', health_check)       
-    webapp.router.add_get('/health', health_check)  
-    webapp.router.add_post('/webhook', handle_webhook)
-
-    runner = web.AppRunner(webapp)
-    await runner.setup()
-
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-
-    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
-
 async def main() -> None:
-    load_dotenv()
-    TOKEN = os.getenv('TOKEN')
-    WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-    if not TOKEN or not WEBHOOK_URL:
-        logger.error("Le variabili d'ambiente TOKEN e WEBHOOK_URL devono essere definite.")
-        return
-    
-    global application
+    """Starts the bot in webhook mode."""
     application = Application.builder().token(TOKEN).build()
-    
-    # Carica eventuali bot_data e registra handler
+
+    # Load data and register handlers
     data = load_bot_data()
     if data:
         application.bot_data.update(data)
     application.bot_data.setdefault("artists", artists)
     application.bot_data.setdefault("owners_ids", set())
 
-    # Registrazione dei command handler
-    application.add_handler(CommandHandler('start', start), group=0)
-    application.add_handler(CommandHandler('set', set_limit_command), group=0)
-    application.add_handler(CommandHandler('artisti', artisti_command), group=0)
-    application.add_handler(CommandHandler('votazioni', votazioni_command), group=0)
-    application.add_handler(CommandHandler('reset', reset_voting), group=0)
-    application.add_handler(CommandHandler('logout', logout), group=0)
-    application.add_handler(CommandHandler('cancel', cancel), group=0)
-
-    # ConversationHandler
+    # ConversationHandler setup (same as before)
     conv = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -1001,17 +954,56 @@ async def main() -> None:
         per_user=True,
         per_chat=True,
     )
+
+    # Register all handlers
+    application.add_handler(CommandHandler('set', set_limit_command))
+    application.add_handler(CommandHandler('artisti', artisti_command))
+    application.add_handler(CommandHandler('votazioni', votazioni_command))
+    application.add_handler(CommandHandler('reset', reset_voting))
+    application.add_handler(CommandHandler('logout', logout))
+    application.add_handler(CommandHandler('cancel', cancel))
     application.add_handler(conv, group=1)
-    application.add_handler(CallbackQueryHandler(owner_button_handler), group=0)
+    application.add_handler(CallbackQueryHandler(owner_button_handler))
 
+    # Initialize bot and set webhook
     await application.initialize()
-
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"Webhook impostato su: {WEBHOOK_URL}")
-
-    await start_webserver()
-
-    await asyncio.Event().wait()
+    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
     
-if __name__ == '__main__':
-    asyncio.run(main())
+    # --- aiohttp Web-Server setup ---
+    async def telegram_webhook(request: web.Request) -> web.Response:
+        """Handles incoming Telegram updates."""
+        try:
+            data = await request.json()
+            update = Update.de_json(data, application.bot)
+            await application.process_update(update)
+            return web.Response()
+        except json.JSONDecodeError:
+            logger.warning("Received a request that was not valid JSON.")
+            return web.Response(status=400)
+
+    async def health_check(request: web.Request) -> web.Response:
+        """Endpoint for Uptime Robot to check if the bot is alive."""
+        return web.Response(text="I'm alive!")
+
+    # Create the web application and add routes
+    app = web.Application()
+    app.router.add_post(f"/{TOKEN}", telegram_webhook) # Secret path for Telegram
+    app.router.add_get("/health", health_check)       # Public path for Uptime Robot
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render provides the HOST '0.0.0.0' automatically
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    
+    logger.info(f"Starting web server on port {PORT}...")
+    await site.start()
+    
+    # Keep the server running
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped.")

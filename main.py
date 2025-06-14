@@ -20,6 +20,9 @@ from typing import Dict, List, Tuple
 load_dotenv()
 PORT = int(os.getenv('PORT', 8443))
 TOKEN = os.getenv("TOKEN")
+WEBHOOK_URL = os.environ["WEBHOOK_URL"].rstrip("/")
+WEBHOOK_PATH = f"/{TOKEN}" 
+FULL_WEBHOOK = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
 
 # Cloudinary Configuration
 cloudinary.config(
@@ -893,18 +896,13 @@ def update_artists_file(artists: dict) -> None:
 
 async def telegram_webhook(request: web.Request) -> web.Response:
     app: Application = request.app["bot_app"]
-    try:
-        data = await request.json()
-    except json.JSONDecodeError:
-        logger.warning("Richiesta non era JSON valido")
-        return web.Response(status=400)
-
+    data = await request.json()
     update = Update.de_json(data, app.bot)
     await app.process_update(update)
     return web.Response(status=200)
 
-WEBHOOK_URL = os.environ["WEBHOOK_URL"].rstrip("/")
-WEBHOOK_PATH = f"/{TOKEN}"
+async def health(request):
+    return web.Response(text="OK")
 
 async def on_startup(aio_app: web.Application):
     bot_app = Application.builder().token(TOKEN).build()
@@ -982,33 +980,25 @@ async def on_startup(aio_app: web.Application):
 
     await bot_app.initialize()
     await bot_app.start()
-
-    # === costruisci qui l'URL completo ===
-    WEBHOOK_PATH = f"/{TOKEN}"
-    full_webhook = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-    await bot_app.bot.set_webhook(full_webhook)
+    await bot_app.bot.set_webhook(FULL_WEBHOOK)
 
     aio_app["bot_app"] = bot_app
-    logger.info("Webhook impostato su: %s", full_webhook)
+    print("Webhook impostato su:", FULL_WEBHOOK)
 
 async def on_cleanup(aio_app: web.Application):
     bot_app: Application = aio_app["bot_app"]
     await bot_app.stop()
     await bot_app.shutdown()
-    logger.info("Bot stoppato e pulito")
-    
-async def health(request):
-    return web.Response(text="OK")
 
 def main():
     aio_app = web.Application()
-    # monta il health‑check
-    aio_app.router.add_get("/", health)
-
-    # startup / cleanup e webhook path come prima…
     aio_app.on_startup.append(on_startup)
     aio_app.on_cleanup.append(on_cleanup)
-    aio_app.router.add_post(f"/{TOKEN}", telegram_webhook)
+
+    # health‑check per UptimeRobot
+    aio_app.router.add_get("/", health)
+    # monta il route di Telegram esattamente su "/<TOKEN>"
+    aio_app.router.add_post(WEBHOOK_PATH, telegram_webhook)
 
     port = int(os.environ.get("PORT", 10000))
     web.run_app(aio_app, host="0.0.0.0", port=port)

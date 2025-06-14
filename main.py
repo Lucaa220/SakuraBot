@@ -980,10 +980,12 @@ async def on_startup(aio_app: web.Application):
 
     await bot_app.initialize()
     await bot_app.start()
+
+    # <<< correggi questa riga:
     await bot_app.bot.set_webhook(FULL_WEBHOOK)
 
     aio_app["bot_app"] = bot_app
-    print("Webhook impostato su:", FULL_WEBHOOK)
+    logger.info("Webhook impostato su: %s", FULL_WEBHOOK)
 
 async def on_cleanup(aio_app: web.Application):
     bot_app: Application = aio_app["bot_app"]
@@ -995,9 +997,10 @@ def main():
     aio_app.on_startup.append(on_startup)
     aio_app.on_cleanup.append(on_cleanup)
 
-    # health‑check per UptimeRobot
+    # health‑check (opzionale ma utile)
     aio_app.router.add_get("/", health)
-    # monta il route di Telegram esattamente su "/<TOKEN>"
+
+    # monta l'unico POST che serve, su /<TOKEN>
     aio_app.router.add_post(WEBHOOK_PATH, telegram_webhook)
 
     port = int(os.environ.get("PORT", 10000))

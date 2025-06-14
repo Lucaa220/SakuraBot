@@ -892,6 +892,24 @@ def update_artists_file(artists: dict) -> None:
     except Exception as e:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
+async def telegram_webhook(request: web.Request) -> web.Response:
+    """Gestisce gli aggiornamenti in arrivo da Telegram."""
+    # Recupera l'oggetto 'application' dallo stato dell'app aiohttp
+    application = request.app["bot_app"]
+
+    try:
+        data = await request.json()
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
+        return web.Response()
+    except json.JSONDecodeError:
+        logger.warning("Received a request that was not valid JSON.")
+        return web.Response(status=400)
+
+async def health_check(request: web.Request) -> web.Response:
+    """Endpoint per Uptime Robot per controllare se il bot è vivo."""
+    return web.Response(text="I'm alive!")
+
 async def main() -> None:
     """Starts the bot in webhook mode."""
     application = Application.builder().token(TOKEN).build()
@@ -967,38 +985,31 @@ async def main() -> None:
 
     # Initialize bot and set webhook
     await application.initialize()
-    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    
-    # --- aiohttp Web-Server setup ---
-    async def telegram_webhook(request: web.Request) -> web.Response:
-        """Handles incoming Telegram updates."""
-        try:
-            data = await request.json()
-            update = Update.de_json(data, application.bot)
-            await application.process_update(update)
-            return web.Response()
-        except json.JSONDecodeError:
-            logger.warning("Received a request that was not valid JSON.")
-            return web.Response(status=400)
+    # Usa un URL segreto per il webhook, di solito il token stesso
+    webhook_path = f"/{TOKEN}"
+    full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
+    await application.bot.set_webhook(url=full_webhook_url)
 
-    async def health_check(request: web.Request) -> web.Response:
-        """Endpoint for Uptime Robot to check if the bot is alive."""
-        return web.Response(text="I'm alive!")
-
-    # Create the web application and add routes
+    # Crea l'applicazione web aiohttp
     app = web.Application()
-    app.router.add_post(f"/{TOKEN}", telegram_webhook) # Secret path for Telegram
-    app.router.add_get("/health", health_check)       # Public path for Uptime Robot
 
+    # --- MODIFICA 3: Collega l'applicazione del bot allo stato dell'app web.
+    app["bot_app"] = application
+
+    # Aggiungi le route
+    app.router.add_post(webhook_path, telegram_webhook)
+    app.router.add_get("/health", health_check)
+
+    # Avvia il server web
     runner = web.AppRunner(app)
     await runner.setup()
-    # Render provides the HOST '0.0.0.0' automatically
     site = web.TCPSite(runner, '0.0.0.0', PORT)
-    
-    logger.info(f"Starting web server on port {PORT}...")
+
+    logger.info(f"Webhook impostato su: {full_webhook_url}")
+    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
     await site.start()
-    
-    # Keep the server running
+
+    # Mantieni il server in esecuzione
     await asyncio.Event().wait()
 
 
@@ -1007,3 +1018,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped.")
+

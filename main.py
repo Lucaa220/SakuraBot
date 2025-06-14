@@ -18,7 +18,6 @@ from typing import Dict, List, Tuple
 
 
 load_dotenv()
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 PORT = int(os.getenv('PORT', 8443))
 TOKEN = os.getenv("TOKEN")
 
@@ -893,35 +892,32 @@ def update_artists_file(artists: dict) -> None:
         print(f"Errore nell'aggiornamento di profili.py: {e}")
 
 async def telegram_webhook(request: web.Request) -> web.Response:
-    """Gestisce gli aggiornamenti in arrivo da Telegram."""
-    # Recupera l'oggetto 'application' dallo stato dell'app aiohttp
-    application = request.app["bot_app"]
-
+    app: Application = request.app["bot_app"]
     try:
         data = await request.json()
-        update = Update.de_json(data, application.bot)
-        await application.process_update(update)
-        return web.Response()
     except json.JSONDecodeError:
-        logger.warning("Received a request that was not valid JSON.")
+        logger.warning("Richiesta non era JSON valido")
         return web.Response(status=400)
 
-async def health_check(request: web.Request) -> web.Response:
-    """Endpoint per Uptime Robot per controllare se il bot è vivo."""
-    return web.Response(text="I'm alive!")
+    update = Update.de_json(data, app.bot)
+    await app.process_update(update)
+    return web.Response(status=200)
 
-async def main() -> None:
-    """Starts the bot in webhook mode."""
-    application = Application.builder().token(TOKEN).build()
+WEBHOOK_URL = os.environ["WEBHOOK_URL"].rstrip("/")
+WEBHOOK_PATH = f"/{TOKEN}"
 
-    # Load data and register handlers
+async def on_startup(aio_app: web.Application):
+    bot_app = Application.builder().token(TOKEN).build()
+
+    # caricare dati bot_data
     data = load_bot_data()
     if data:
-        application.bot_data.update(data)
-    application.bot_data.setdefault("artists", artists)
-    application.bot_data.setdefault("owners_ids", set())
+        bot_app.bot_data.update(data)
+    # esempi di default
+    bot_app.bot_data.setdefault("artists", [])
+    bot_app.bot_data.setdefault("owners_ids", set())
 
-    # ConversationHandler setup (same as before)
+    # ConversationHandler
     conv = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -969,47 +965,43 @@ async def main() -> None:
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
+        per_message=True,
         per_user=True,
         per_chat=True,
     )
 
-    # Register all handlers
-    application.add_handler(CommandHandler('set', set_limit_command))
-    application.add_handler(CommandHandler('artisti', artisti_command))
-    application.add_handler(CommandHandler('votazioni', votazioni_command))
-    application.add_handler(CommandHandler('reset', reset_voting))
-    application.add_handler(CommandHandler('logout', logout))
-    application.add_handler(CommandHandler('cancel', cancel))
-    application.add_handler(conv, group=1)
-    application.add_handler(CallbackQueryHandler(owner_button_handler))
+    # registra handler
+    bot_app.add_handler(CommandHandler('set', lambda u,c: None))  # implementa set_limit_command
+    bot_app.add_handler(CommandHandler('artisti', artisti_command))
+    bot_app.add_handler(CommandHandler('votazioni', votazioni_command))
+    bot_app.add_handler(CommandHandler('reset', reset_voting))
+    bot_app.add_handler(CommandHandler('logout', logout))
+    bot_app.add_handler(CommandHandler('cancel', cancel))
+    bot_app.add_handler(conv, group=1)
+    bot_app.add_handler(CallbackQueryHandler(owner_button_handler))
 
-    # Initialize bot and set webhook
-    await application.initialize()
-    webhook_path = f"/{TOKEN}"
-    full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
-    
-    await application.bot.set_webhook(url=full_webhook_url)
+    # inizializza e avvia bot
+    await bot_app.initialize()
+    await bot_app.start()
+    await bot_app.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
 
-    app = web.Application()
-    app["bot_app"] = application
+    aio_app["bot_app"] = bot_app
+    logger.info("Bot avviato e webhook impostato su %s%s", WEBHOOK_URL, WEBHOOK_PATH)
 
-    # --- MODIFICA CHIAVE 2: Il server si mette in ascolto sullo STESSO percorso ---
-    app.router.add_post(webhook_path, telegram_webhook)
-    app.router.add_get("/health", health_check)
+async def on_cleanup(aio_app: web.Application):
+    bot_app: Application = aio_app["bot_app"]
+    await bot_app.stop()
+    await bot_app.shutdown()
+    logger.info("Bot stoppato e pulito")
 
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
+def main():
+    aio_app = web.Application()
+    aio_app.on_startup.append(on_startup)
+    aio_app.on_cleanup.append(on_cleanup)
+    aio_app.router.add_post(WEBHOOK_PATH, telegram_webhook)
 
-    logger.info(f"Webhook impostato su: {full_webhook_url}") # Questo log ora mostrerà l'URL corretto
-    logger.info(f"Webserver avviato su 0.0.0.0:{PORT}")
-    await site.start()
-
-    await asyncio.Event().wait()
+    port = int(os.environ.get("PORT", 10000))
+    web.run_app(aio_app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped.")
-
+    main()
